@@ -2,6 +2,7 @@ package com.qingping.adblock
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
@@ -17,6 +18,7 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
     private lateinit var content: LinearLayout
+    private var awaitingAccessibilityAuthorization = false
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
@@ -28,7 +30,32 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (awaitingAccessibilityAuthorization) {
+            awaitingAccessibilityAuthorization = false
+            if (!isAccessibilityServiceEnabled()) {
+                AppData.setDetectionEnabled(this, false)
+                Toast.makeText(this, "未授权无障碍服务，清屏将退出", Toast.LENGTH_LONG).show()
+                finish()
+                return
+            }
+            Toast.makeText(this, "无障碍服务已授权，自动识别已就绪", Toast.LENGTH_SHORT).show()
+        }
         if (::content.isInitialized) render()
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val enabledServices = Settings.Secure.getString(
+            contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+        val expected = ComponentName(this, AdGuardAccessibilityService::class.java)
+            .flattenToString()
+        return enabledServices.split(':').any { it.equals(expected, ignoreCase = true) }
+    }
+
+    private fun openAccessibilitySettings() {
+        awaitingAccessibilityAuthorization = true
+        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
 
     private fun render() {
@@ -52,26 +79,52 @@ class MainActivity : Activity() {
         })
 
         val enabled = CheckBox(this).apply {
-            text = "启用疑似广告识别"
+            text = "自动清屏（疑似广告识别）"
             textSize = 17f
             isChecked = AppData.isDetectionEnabled(this@MainActivity)
             setOnCheckedChangeListener { _, checked ->
                 AppData.setDetectionEnabled(this@MainActivity, checked)
-                Toast.makeText(
-                    this@MainActivity,
-                    if (checked) "已启用识别" else "已暂停识别",
-                    Toast.LENGTH_SHORT
-                ).show()
+                if (!checked) {
+                    Toast.makeText(this@MainActivity, "已暂停识别", Toast.LENGTH_SHORT).show()
+                } else if (isAccessibilityServiceEnabled()) {
+                    Toast.makeText(this@MainActivity, "自动识别已启用", Toast.LENGTH_SHORT).show()
+                } else {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("需要无障碍授权")
+                        .setMessage("自动清屏需要无障碍服务权限。请选择前往系统设置授权；如果不授权，清屏应用将自动退出。Android 不允许应用代替用户开启此权限。")
+                        .setCancelable(false)
+                        .setNegativeButton("不授权，退出") { _, _ ->
+                            AppData.setDetectionEnabled(this@MainActivity, false)
+                            finish()
+                        }
+                        .setPositiveButton("前往授权") { _, _ ->
+                            openAccessibilitySettings()
+                        }
+                        .show()
+                }
             }
         }
         content.addView(enabled)
         content.addView(TextView(this).apply {
-            text = "识别服务需要在系统无障碍设置中手动启用。当前只记录疑似广告线索，不会自动点击或返回。"
+            text = if (serviceEnabled()) {
+                "无障碍服务：已开启。当前只识别并记录疑似广告线索，不会自动点击或返回。"
+            } else {
+                "无障碍服务：未开启。启用自动清屏后需在系统设置中手动授权；拒绝授权将退出应用。"
+            }
             textSize = 14f
             setPadding(0, dp(4), 0, dp(12))
         })
         content.addView(button("打开无障碍设置") {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            if (isAccessibilityServiceEnabled()) {
+                openAccessibilitySettings()
+            } else {
+                AlertDialog.Builder(this)
+                    .setTitle("需要无障碍授权")
+                    .setMessage("请在系统设置中手动开启“清屏广告识别服务”。如果返回时仍未授权，清屏将自动退出。")
+                    .setNegativeButton("取消并退出") { _, _ -> finish() }
+                    .setPositiveButton("前往授权") { _, _ -> openAccessibilitySettings() }
+                    .show()
+            }
         })
 
         addSection("识别规则（关键词）")
@@ -177,6 +230,8 @@ class MainActivity : Activity() {
 
         setContentView(scroll)
     }
+
+    private fun serviceEnabled(): Boolean = isAccessibilityServiceEnabled()
 
     private fun addSection(title: String) {
         content.addView(View(this).apply {
