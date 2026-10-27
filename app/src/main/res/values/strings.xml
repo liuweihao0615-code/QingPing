@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">清屏</string>
+    <string name="adguard_description">识别疑似广告界面并记录候选事件。当前版本不会自动点击或返回。</string>
+</resources>
