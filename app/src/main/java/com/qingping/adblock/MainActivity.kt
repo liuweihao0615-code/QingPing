@@ -109,7 +109,7 @@ class MainActivity : Activity() {
         })
         val packageInput = EditText(this).apply {
             hint = "应用包名，例如 com.example.app"
-            singleLine = true
+            setSingleLine(true)
         }
         content.addView(packageInput)
         content.addView(button("添加忽略应用") {
