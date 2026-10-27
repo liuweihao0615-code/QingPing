@@ -6,33 +6,49 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
 
 class AdGuardAccessibilityService : AccessibilityService() {
-    private var lastFingerprint = ""
+    private val lastFingerprintByPackage = mutableMapOf<String, String>()
+    private val lastRecordedAtByPackage = mutableMapOf<String, Long>()
     private var lastToastAt = 0L
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
-        if (event.packageName?.toString() == packageName) return
+        if (!AppData.isDetectionEnabled(this)) return
+
+        val sourcePackage = event.packageName?.toString() ?: return
+        if (sourcePackage == packageName || AppData.isPackageIgnored(this, sourcePackage)) return
 
         val type = event.eventType
         if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
 
         val root = rootInActiveWindow ?: return
-        val text = buildString {
-            collectText(root, this)
-        }.lowercase().take(1500)
+        val text = buildString { collectText(root, this) }
+            .lowercase()
+            .take(2500)
+        if (text.isBlank()) return
 
-        if (text.isBlank() || text == lastFingerprint) return
-        lastFingerprint = text
+        val fingerprint = text.hashCode().toString()
+        if (lastFingerprintByPackage[sourcePackage] == fingerprint) return
+        lastFingerprintByPackage[sourcePackage] = fingerprint
 
-        val adHint = listOf("广告", "sponsored", "advertisement", "跳过", "skip")
-            .any { text.contains(it) }
+        val matchingRule = AppData.getRules(this)
+            .firstOrNull { text.contains(it.lowercase()) } ?: return
 
-        // 原型仅展示候选提示，不自动执行系统返回或点击，避免误操作。
+        // Count candidate detections, not guaranteed ad blocks.
         val now = System.currentTimeMillis()
-        if (adHint && now - lastToastAt > 10_000L) {
+        val previous = lastRecordedAtByPackage[sourcePackage] ?: 0L
+        if (now - previous < 10_000L) return
+
+        lastRecordedAtByPackage[sourcePackage] = now
+        AppData.recordCandidate(this, sourcePackage)
+
+        if (now - lastToastAt > 10_000L) {
             lastToastAt = now
-            Toast.makeText(this, "清屏：发现疑似广告线索", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                this,
+                "清屏：${sourcePackage.substringAfterLast('.')} 出现疑似广告线索（规则：${matchingRule}）",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
