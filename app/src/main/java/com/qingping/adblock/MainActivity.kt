@@ -1,57 +1,221 @@
 package com.qingping.adblock
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 
 class MainActivity : Activity() {
+    private lateinit var content: LinearLayout
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        render()
+    }
 
-        val layout = LinearLayout(this).apply {
+    override fun onResume() {
+        super.onResume()
+        if (::content.isInitialized) render()
+    }
+
+    private fun render() {
+        val scroll = ScrollView(this)
+        content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(32, 48, 32, 32)
+            setPadding(dp(20), dp(24), dp(20), dp(32))
         }
+        scroll.addView(content)
 
-        val title = TextView(this).apply {
+        content.addView(TextView(this).apply {
             text = "清屏"
-            textSize = 32f
+            textSize = 30f
             gravity = Gravity.CENTER
-        }
-        val subtitle = TextView(this).apply {
-            text = "开屏广告识别原型"
-            textSize = 18f
+        })
+        content.addView(TextView(this).apply {
+            text = "开屏广告线索识别 · 本地规则与统计"
+            textSize = 15f
             gravity = Gravity.CENTER
-            setPadding(0, 12, 0, 24)
-        }
-        val explanation = TextView(this).apply {
-            text = "请手动启用无障碍服务。当前版本只检测部分可访问文本中的疑似广告线索，不会自动点击或返回，也不保证拦截所有广告。"
-            textSize = 16f
-            setPadding(0, 0, 0, 24)
-        }
-        val settingsButton = Button(this).apply {
-            text = "打开无障碍设置"
-            setOnClickListener {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            setPadding(0, dp(6), 0, dp(18))
+        })
+
+        val enabled = CheckBox(this).apply {
+            text = "启用疑似广告识别"
+            textSize = 17f
+            isChecked = AppData.isDetectionEnabled(this@MainActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppData.setDetectionEnabled(this@MainActivity, checked)
+                Toast.makeText(
+                    this@MainActivity,
+                    if (checked) "已启用识别" else "已暂停识别",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
-        val status = TextView(this).apply {
-            text = "统计与规则管理将在后续版本接入。"
+        content.addView(enabled)
+        content.addView(TextView(this).apply {
+            text = "识别服务需要在系统无障碍设置中手动启用。当前只记录疑似广告线索，不会自动点击或返回。"
             textSize = 14f
-            setPadding(0, 24, 0, 0)
+            setPadding(0, dp(4), 0, dp(12))
+        })
+        content.addView(button("打开无障碍设置") {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        })
+
+        addSection("识别规则（关键词）")
+        content.addView(TextView(this).apply {
+            text = "界面可访问文本包含下列任一关键词时，可能记为疑似广告事件。规则保存在本机。"
+            textSize = 13f
+        })
+        val ruleInput = EditText(this).apply {
+            hint = "输入关键词，例如：广告、跳过"
+            singleLine = true
+        }
+        content.addView(ruleInput)
+        content.addView(button("添加关键词") {
+            val rule = ruleInput.text.toString().trim()
+            if (rule.isEmpty()) {
+                Toast.makeText(this, "请先输入关键词", Toast.LENGTH_SHORT).show()
+            } else if (AppData.addRule(this, rule)) {
+                Toast.makeText(this, "已添加规则", Toast.LENGTH_SHORT).show()
+                render()
+            } else {
+                Toast.makeText(this, "规则已存在", Toast.LENGTH_SHORT).show()
+            }
+        })
+        AppData.getRules(this).sorted().forEach { rule ->
+            content.addView(itemRow(rule, "删除") {
+                AppData.removeRule(this, rule)
+                render()
+            })
         }
 
-        layout.addView(title)
-        layout.addView(subtitle)
-        layout.addView(explanation)
-        layout.addView(settingsButton)
-        layout.addView(status)
-        setContentView(layout)
+        addSection("忽略的应用")
+        content.addView(TextView(this).apply {
+            text = "填写应用包名后，该应用不会参与识别或计数。例如：com.example.app。"
+            textSize = 13f
+        })
+        val packageInput = EditText(this).apply {
+            hint = "应用包名，例如 com.example.app"
+            singleLine = true
+        }
+        content.addView(packageInput)
+        content.addView(button("添加忽略应用") {
+            val pkg = packageInput.text.toString().trim()
+            if (AppData.addIgnoredPackage(this, pkg)) {
+                Toast.makeText(this, "已加入忽略列表", Toast.LENGTH_SHORT).show()
+                render()
+            } else {
+                Toast.makeText(this, "包名格式不正确或已存在", Toast.LENGTH_SHORT).show()
+            }
+        })
+        val ignored = AppData.getIgnoredPackages(this).sorted()
+        if (ignored.isEmpty()) {
+            content.addView(note("暂无忽略应用"))
+        } else {
+            ignored.forEach { pkg ->
+                content.addView(itemRow(pkg, "移除") {
+                    AppData.removeIgnoredPackage(this, pkg)
+                    render()
+                })
+            }
+        }
+
+        addSection("疑似广告统计")
+        content.addView(TextView(this).apply {
+            text = "以下是按应用统计的疑似广告线索次数，不代表已成功关闭或拦截广告。统计只保存在本机。"
+            textSize = 13f
+        })
+        val stats = AppData.getStatistics(this).toList().sortedByDescending { it.second }
+        val total = stats.sumOf { it.second }
+        content.addView(TextView(this).apply {
+            text = "累计疑似事件：$total"
+            textSize = 19f
+            setPadding(0, dp(8), 0, dp(8))
+        })
+        if (stats.isEmpty()) {
+            content.addView(note("暂无记录。启用识别服务后，出现匹配规则的界面时会尝试记录。"))
+        } else {
+            stats.forEach { (pkg, count) ->
+                val label = try {
+                    packageManager.getApplicationLabel(
+                        packageManager.getApplicationInfo(pkg, 0)
+                    ).toString()
+                } catch (_: Exception) {
+                    pkg
+                }
+                content.addView(TextView(this).apply {
+                    text = "$label（$pkg）：$count 次"
+                    textSize = 15f
+                    setPadding(0, dp(5), 0, dp(5))
+                })
+            }
+        }
+        content.addView(button("清空统计") {
+            AlertDialog.Builder(this)
+                .setTitle("清空统计")
+                .setMessage("确定删除本机保存的全部疑似广告统计吗？此操作无法撤销。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("清空") { _, _ ->
+                    AppData.clearStatistics(this)
+                    render()
+                }
+                .show()
+        })
+
+        setContentView(scroll)
     }
+
+    private fun addSection(title: String) {
+        content.addView(View(this).apply {
+            setBackgroundColor(0xFFE0E0E0.toInt())
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
+        ).apply {
+            topMargin = dp(18)
+            bottomMargin = dp(12)
+        })
+        content.addView(TextView(this).apply {
+            text = title
+            textSize = 20f
+            setPadding(0, 0, 0, dp(8))
+        })
+    }
+
+    private fun note(textValue: String) = TextView(this).apply {
+        text = textValue
+        textSize = 14f
+        setPadding(0, dp(6), 0, dp(8))
+    }
+
+    private fun button(label: String, action: () -> Unit) =
+        Button(this).apply {
+            text = label
+            setOnClickListener { action() }
+        }
+
+    private fun itemRow(value: String, actionLabel: String, action: () -> Unit) =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val text = TextView(this@MainActivity).apply {
+                this.text = value
+                textSize = 14f
+                setPadding(0, dp(4), dp(8), dp(4))
+            }
+            addView(text, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(button(actionLabel, action))
+        }
 }
