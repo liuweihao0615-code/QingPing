@@ -81,7 +81,7 @@ class MainActivity : Activity() {
         })
         val ruleInput = EditText(this).apply {
             hint = "输入关键词，例如：广告、跳过"
-            singleLine = true
+            setSingleLine(true)
         }
         content.addView(ruleInput)
         content.addView(button("添加关键词") {
