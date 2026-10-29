@@ -72,7 +72,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         })
         content.addView(TextView(this).apply {
-            text = "开屏广告线索识别 · 本地规则与统计"
+            text = "开屏广告识别与安全跳过 · 本地规则与统计"
             textSize = 15f
             gravity = Gravity.CENTER
             setPadding(0, dp(6), 0, dp(18))
@@ -188,13 +188,15 @@ class MainActivity : Activity() {
 
         addSection("疑似广告统计")
         content.addView(TextView(this).apply {
-            text = "以下是按应用统计的疑似广告线索次数，不代表已成功关闭或拦截广告。统计只保存在本机。"
+            text = "按应用统计疑似广告线索，以及成功触发无障碍点击的跳过按钮次数。点击次数不保证广告最终关闭。统计只保存在本机。"
             textSize = 13f
         })
         val stats = AppData.getStatistics(this).toList().sortedByDescending { it.second }
+        val dismissStats = AppData.getDismissStatistics(this)
+        val dismissTotal = dismissStats.values.sum()
         val total = stats.sumOf { it.second }
         content.addView(TextView(this).apply {
-            text = "累计疑似事件：$total"
+            text = "累计疑似事件：$total\n成功触发跳过按钮点击：$dismissTotal"
             textSize = 19f
             setPadding(0, dp(8), 0, dp(8))
         })
@@ -210,7 +212,7 @@ class MainActivity : Activity() {
                     pkg
                 }
                 content.addView(TextView(this).apply {
-                    text = "$label（$pkg）：$count 次"
+                    text = "$label（$pkg）：$count 次疑似线索；${dismissStats[pkg] ?: 0} 次按钮点击成功"
                     textSize = 15f
                     setPadding(0, dp(5), 0, dp(5))
                 })
