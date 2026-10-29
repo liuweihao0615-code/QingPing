@@ -103,7 +103,7 @@ object AppData {
     fun clearStatistics(context: Context) {
         val editor = prefs(context).edit()
         prefs(context).all.keys
-            .filter { it.startsWith(STAT_PREFIX) }
+            .filter { it.startsWith(STAT_PREFIX) || it.startsWith(DISMISS_PREFIX) }
             .forEach { editor.remove(it) }
         editor.apply()
     }
