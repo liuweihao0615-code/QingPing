@@ -8,6 +8,7 @@ import android.widget.Toast
 class AdGuardAccessibilityService : AccessibilityService() {
     private val lastFingerprintByPackage = mutableMapOf<String, String>()
     private val lastRecordedAtByPackage = mutableMapOf<String, Long>()
+    private val lastDismissAttemptAtByPackage = mutableMapOf<String, Long>()
     private var lastToastAt = 0L
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -32,7 +33,10 @@ class AdGuardAccessibilityService : AccessibilityService() {
 
         // Only click an explicit, accessible skip/ad-dismiss button. Never click ad content
         // or blindly issue BACK, which could close the user's current app or page.
-        if (tryClickSafeDismissButton(root)) {
+        val nowForDismiss = System.currentTimeMillis()
+        val lastDismissAt = lastDismissAttemptAtByPackage[sourcePackage] ?: 0L
+        if (nowForDismiss - lastDismissAt >= 2_000L && tryClickSafeDismissButton(root)) {
+            lastDismissAttemptAtByPackage[sourcePackage] = nowForDismiss
             AppData.recordDismissAttemptSucceeded(this, sourcePackage)
             Toast.makeText(
                 this,
