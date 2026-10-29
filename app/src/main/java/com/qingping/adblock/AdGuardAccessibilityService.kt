@@ -27,12 +27,23 @@ class AdGuardAccessibilityService : AccessibilityService() {
             .take(2500)
         if (text.isBlank()) return
 
+        val matchingRule = AppData.getRules(this)
+            .firstOrNull { text.contains(it.lowercase()) } ?: return
+
+        // Only click an explicit, accessible skip/ad-dismiss button. Never click ad content
+        // or blindly issue BACK, which could close the user's current app or page.
+        if (tryClickSafeDismissButton(root)) {
+            AppData.recordDismissAttemptSucceeded(this, sourcePackage)
+            Toast.makeText(
+                this,
+                "清屏：已触发 ${sourcePackage.substringAfterLast('.')} 的跳过按钮点击",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+
         val fingerprint = text.hashCode().toString()
         if (lastFingerprintByPackage[sourcePackage] == fingerprint) return
         lastFingerprintByPackage[sourcePackage] = fingerprint
-
-        val matchingRule = AppData.getRules(this)
-            .firstOrNull { text.contains(it.lowercase()) } ?: return
 
         // Count candidate detections, not guaranteed ad blocks.
         val now = System.currentTimeMillis()
@@ -50,6 +61,34 @@ class AdGuardAccessibilityService : AccessibilityService() {
                 Toast.LENGTH_SHORT
             ).show()
         }
+    }
+
+    private fun tryClickSafeDismissButton(node: AccessibilityNodeInfo): Boolean {
+        val label = listOfNotNull(
+            node.text?.toString(),
+            node.contentDescription?.toString()
+        ).joinToString(" ").trim().lowercase()
+
+        if (node.isClickable && isSafeDismissLabel(label)) {
+            return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val clicked = tryClickSafeDismissButton(child)
+            child.recycle()
+            if (clicked) return true
+        }
+        return false
+    }
+
+    private fun isSafeDismissLabel(label: String): Boolean {
+        val normalized = label.replace(Regex("\\s+"), "")
+        if (normalized in setOf("跳过", "跳过广告", "关闭广告", "关闭广告页")) return true
+        if (normalized.startsWith("跳过") && normalized.length <= 10) return true
+        if (normalized in setOf("skip", "skipad", "closead", "closeadvertisement")) return true
+        if (normalized.startsWith("skip") && normalized.length <= 16) return true
+        return false
     }
 
     private fun collectText(node: AccessibilityNodeInfo, out: StringBuilder) {
