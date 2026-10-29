@@ -12,6 +12,7 @@ object AppData {
     private const val KEY_RULES = "keyword_rules"
     private const val KEY_IGNORED = "ignored_packages"
     private const val STAT_PREFIX = "candidate_count_"
+    private const val DISMISS_PREFIX = "dismiss_attempt_succeeded_"
 
     private val defaultRules = setOf("广告", "sponsored", "advertisement", "跳过", "skip")
 
@@ -74,9 +75,25 @@ object AppData {
         p.edit().putInt(key, p.getInt(key, 0) + 1).apply()
     }
 
+    fun recordDismissAttemptSucceeded(context: Context, packageName: String) {
+        if (packageName.isBlank()) return
+        val p = prefs(context)
+        val key = DISMISS_PREFIX + packageName
+        p.edit().putInt(key, p.getInt(key, 0) + 1).apply()
+    }
+
+    fun getDismissStatistics(context: Context): Map<String, Int> {
+        return prefs(context).all
+            .filterKeys { it.startsWith(DISMISS_PREFIX) }
+            .mapNotNull { (key, value) ->
+                val count = value as? Int ?: return@mapNotNull null
+                key.removePrefix(DISMISS_PREFIX) to count
+            }.toMap()
+    }
+
     fun getStatistics(context: Context): Map<String, Int> {
         return prefs(context).all
-            .filterKeys { it.startsWith(STAT_PREFIX) }
+            .filterKeys { it.startsWith(STAT_PREFIX) || it.startsWith(DISMISS_PREFIX) }
             .mapNotNull { (key, value) ->
                 val count = value as? Int ?: return@mapNotNull null
                 key.removePrefix(STAT_PREFIX) to count
