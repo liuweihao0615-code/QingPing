@@ -29,10 +29,11 @@ class AdGuardAccessibilityService : AccessibilityService() {
         if (text.isBlank()) return
 
         val matchingRule = AppData.getRules(this)
-            .firstOrNull { text.contains(it.lowercase()) } ?: return
+            .firstOrNull { text.contains(it.lowercase()) }
 
-        // Only click an explicit, accessible skip/ad-dismiss button. Never click ad content
-        // or blindly issue BACK, which could close the user's current app or page.
+        // An explicit skip button is itself a strong enough signal to try a click;
+        // don't require the whole window to contain a keyword such as "advertisement".
+        // Never click ad creatives or blindly issue BACK.
         val nowForDismiss = System.currentTimeMillis()
         val lastDismissAt = lastDismissAttemptAtByPackage[sourcePackage] ?: 0L
         if (nowForDismiss - lastDismissAt >= 2_000L && tryClickSafeDismissButton(root)) {
@@ -40,10 +41,13 @@ class AdGuardAccessibilityService : AccessibilityService() {
             AppData.recordDismissAttemptSucceeded(this, sourcePackage)
             Toast.makeText(
                 this,
-                "清屏：已触发 ${sourcePackage.substringAfterLast('.')} 的跳过按钮点击",
+                "清屏：已尝试点击 ${sourcePackage.substringAfterLast('.')} 的跳过/关闭按钮",
                 Toast.LENGTH_SHORT
             ).show()
         }
+
+        // Continue candidate tracking separately from skip-button handling.
+        if (matchingRule == null) return
 
         val fingerprint = text.hashCode().toString()
         if (lastFingerprintByPackage[sourcePackage] == fingerprint) return
@@ -73,8 +77,23 @@ class AdGuardAccessibilityService : AccessibilityService() {
             node.contentDescription?.toString()
         ).joinToString(" ").trim().lowercase()
 
-        if (node.isClickable && isSafeDismissLabel(label)) {
-            return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        if (isSafeDismissLabel(label)) {
+            // Some apps expose the label on a non-clickable TextView and put the
+            // click action on a clickable parent container.
+            if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                return true
+            }
+            var parent = node.parent
+            var depth = 0
+            while (parent != null && depth < 4) {
+                val clicked = parent.isClickable &&
+                    parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                val nextParent = if (!clicked) parent.parent else null
+                parent.recycle()
+                if (clicked) return true
+                parent = nextParent
+                depth++
+            }
         }
 
         for (i in 0 until node.childCount) {
